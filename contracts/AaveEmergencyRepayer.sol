@@ -7,8 +7,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 interface IAavePool {
+    /// @notice Redeems Aave aTokens held by `msg.sender` into the underlying asset.
     function withdraw(address asset, uint256 amount, address to) external returns (uint256);
 
+    /// @notice Repays Aave debt for `onBehalfOf` using `asset` already approved by the caller.
     function repay(
         address asset,
         uint256 amount,
@@ -16,6 +18,7 @@ interface IAavePool {
         address onBehalfOf
     ) external returns (uint256);
 
+    /// @notice Starts an Aave V3 single-asset flash loan and calls the receiver callback.
     function flashLoanSimple(
         address receiverAddress,
         address asset,
@@ -24,10 +27,13 @@ interface IAavePool {
         uint16 referralCode
     ) external;
 
+    /// @notice Returns Aave's current flash-loan premium in basis points.
     function FLASHLOAN_PREMIUM_TOTAL() external view returns (uint128);
 
+    /// @notice Returns the Aave addresses provider backing this pool.
     function ADDRESSES_PROVIDER() external view returns (address);
 
+    /// @notice Returns account-level Aave risk data; this contract only consumes `healthFactor`.
     function getUserAccountData(address user)
         external
         view
@@ -58,34 +64,44 @@ interface IAavePool {
         uint128 isolationModeTotalDebt;
     }
 
+    /// @notice Returns reserve metadata, including canonical aToken and debt-token addresses.
     function getReserveData(address asset) external view returns (ReserveDataLegacy memory);
 }
 
 interface IAaveOracle {
+    /// @notice Returns Aave's base-currency price for an asset.
     function getAssetPrice(address asset) external view returns (uint256);
 }
 
 interface IPoolAddressesProvider {
+    /// @notice Returns the current Aave oracle address.
     function getPriceOracle() external view returns (address);
 }
 
 interface IAaveReserveToken {
+    /// @notice Returns the underlying asset represented by an Aave reserve token.
     function UNDERLYING_ASSET_ADDRESS() external view returns (address);
 
+    /// @notice Returns the Aave pool that minted/manages this reserve token.
     function POOL() external view returns (address);
 }
 
 interface IUniswapV3Factory {
+    /// @notice Returns the canonical Uniswap V3 pool for a token pair and fee tier.
     function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool);
 }
 
 interface IUniswapV3Pool {
+    /// @notice Returns the first token in the pool's sorted token pair.
     function token0() external view returns (address);
 
+    /// @notice Returns the second token in the pool's sorted token pair.
     function token1() external view returns (address);
 
+    /// @notice Returns the pool fee tier.
     function fee() external view returns (uint24);
 
+    /// @notice Returns the Uniswap V3 factory that created this pool.
     function factory() external view returns (address);
 }
 
@@ -101,11 +117,13 @@ interface IUniswapV3SwapRouter {
         uint160 sqrtPriceLimitX96;
     }
 
+    /// @notice Swaps as little tokenIn as possible for an exact tokenOut amount.
     function exactOutputSingle(ExactOutputSingleParams calldata params)
         external
         payable
         returns (uint256 amountIn);
 
+    /// @notice Returns the Uniswap V3 factory used by this router.
     function factory() external view returns (address);
 }
 
@@ -190,6 +208,7 @@ contract AaveEmergencyRepayer {
     error UnexpectedUsdcReceived(uint256 received, uint256 expected);
     error UnexpectedATokenTransferAmount(uint256 received, uint256 expected);
     error UnexpectedWithdrawAmount(uint256 withdrawn, uint256 expected);
+    error NativeEthSweepFailed();
 
     event EmergencyRepayStarted(
         address indexed positionOwner,
@@ -218,6 +237,8 @@ contract AaveEmergencyRepayer {
         _;
     }
 
+    /// @notice Deploys an immutable emergency repayer and validates all configured Aave/Uniswap bindings.
+    /// @dev Reverts on wrong actors, missing code, wrong decimals, wrong reserve tokens, or wrong pool/fee.
     constructor(Config memory c) {
         if (
             c.aavePool == address(0) || c.swapRouter == address(0)
@@ -285,6 +306,8 @@ contract AaveEmergencyRepayer {
         if (!validTokens) revert InvalidUniswapPoolTokens();
     }
 
+    /// @notice Checks that an Aave aToken matches the expected underlying asset and pool.
+    /// @dev Used at deployment to prevent configuring a fake or wrong-market aWETH.
     function _validateAToken(address token, address expectedUnderlying, address expectedPool) private view {
         try IAaveReserveToken(token).UNDERLYING_ASSET_ADDRESS() returns (address underlying) {
             if (underlying != expectedUnderlying) revert InvalidAToken();
@@ -299,6 +322,8 @@ contract AaveEmergencyRepayer {
         }
     }
 
+    /// @notice Checks that an Aave debt token matches the expected underlying asset and pool.
+    /// @dev Used at deployment to prevent repaying the wrong USDC debt market.
     function _validateDebtToken(address token, address expectedUnderlying, address expectedPool) private view {
         try IAaveReserveToken(token).UNDERLYING_ASSET_ADDRESS() returns (address underlying) {
             if (underlying != expectedUnderlying) revert InvalidDebtToken();
@@ -313,6 +338,8 @@ contract AaveEmergencyRepayer {
         }
     }
 
+    /// @notice Checks that the Aave pool reserve registry points to the configured aToken and debt token.
+    /// @dev This ties WETH to aWETH and USDC to variable-debt USDC through Aave's own reserve data.
     function _validateReserveBinding(
         address pool,
         address weth,
@@ -337,7 +364,8 @@ contract AaveEmergencyRepayer {
     // Emergency path
     // -------------------------------------------------------------------------
 
-    /// @notice Called by the disposable keeper or position owner. Reverts unless owner HF is at/below trigger.
+    /// @notice Executes the emergency full repayment when the owner's Aave health factor is at or below trigger.
+    /// @dev Callable only by `KEEPER` or `POSITION_OWNER`; the caller cannot choose tokens, routes, or amounts.
     function checkAndRepay() external onlyKeeperOrPositionOwner {
         uint256 hf = healthFactor();
         if (hf > TRIGGER_HEALTH_FACTOR) {
@@ -346,11 +374,14 @@ contract AaveEmergencyRepayer {
         _repayAllDebtWithCollateral(hf);
     }
 
-    /// @notice Allows POSITION_OWNER to execute the same emergency close before the trigger is reached.
+    /// @notice Lets `POSITION_OWNER` execute the same full repayment even before the trigger is reached.
+    /// @dev This is the manual override path; no keeper or HF trigger is required.
     function forceRepayAll() external onlyPositionOwner {
         _repayAllDebtWithCollateral(healthFactor());
     }
 
+    /// @notice Starts the flash-loan repayment flow after prechecking debt, aWETH balance, and allowance.
+    /// @dev Uses worst-case collateral requirements before the flash loan, then the callback pulls actual collateral.
     function _repayAllDebtWithCollateral(uint256 hf) internal {
         if (flashActive) revert FlashAlreadyActive();
 
@@ -387,7 +418,8 @@ contract AaveEmergencyRepayer {
         _sweepLooseBalances();
     }
 
-    /// @notice Aave V3 flashLoanSimple callback.
+    /// @notice Aave V3 `flashLoanSimple` callback that swaps WETH, repays USDC debt, and returns flash liquidity.
+    /// @dev Accepts callbacks only from the configured Aave pool, for WETH, initiated by this contract.
     function executeOperation(
         address asset,
         uint256 amount,
@@ -423,6 +455,8 @@ contract AaveEmergencyRepayer {
         return true;
     }
 
+    /// @notice Swaps flash-borrowed WETH for an exact amount of USDC through the fixed Uniswap V3 pool.
+    /// @dev Verifies the actual USDC balance increase so execution does not rely only on router return data.
     function _swapWethForExactUsdc(uint256 amount, uint256 usdcTarget) private returns (uint256 wethSpent) {
         uint256 usdcBefore = USDC.balanceOf(address(this));
         WETH.forceApprove(address(SWAP_ROUTER), amount);
@@ -446,6 +480,8 @@ contract AaveEmergencyRepayer {
         }
     }
 
+    /// @notice Repays the owner's variable USDC debt on Aave using the USDC held by this contract.
+    /// @dev Approves Aave only for the exact target amount and clears the approval after repayment.
     function _repayOwnerDebt(uint256 usdcTarget) private returns (uint256 repaid, uint256 remainingDebt) {
         USDC.forceApprove(address(AAVE_POOL), usdcTarget);
         repaid = AAVE_POOL.repay(
@@ -458,6 +494,8 @@ contract AaveEmergencyRepayer {
         remainingDebt = VARIABLE_DEBT_USDC.balanceOf(POSITION_OWNER);
     }
 
+    /// @notice Pulls the required owner aWETH and withdraws it from Aave into WETH for flash-loan repayment.
+    /// @dev Rechecks balance/allowance immediately before transfer and validates received/withdrawn amounts.
     function _pullAndWithdrawOwnerCollateral(uint256 collateralToWithdraw) private returns (uint256 aWethReceived) {
         uint256 currentOwnerAWethBalance = A_WETH.balanceOf(POSITION_OWNER);
         if (currentOwnerAWethBalance < collateralToWithdraw) {
@@ -486,15 +524,20 @@ contract AaveEmergencyRepayer {
     // Views
     // -------------------------------------------------------------------------
 
+    /// @notice Returns the current Aave health factor for `POSITION_OWNER`.
+    /// @dev Reads account-level data directly from the immutable Aave pool.
     function healthFactor() public view returns (uint256 hf) {
         (, , , , , hf) = AAVE_POOL.getUserAccountData(POSITION_OWNER);
     }
 
+    /// @notice Returns the owner's current variable native-USDC debt-token balance.
+    /// @dev A zero value means there is no USDC debt for this contract to repay.
     function currentDebtUsdc() public view returns (uint256) {
         return VARIABLE_DEBT_USDC.balanceOf(POSITION_OWNER);
     }
 
-    /// @notice Oracle-fair WETH (no slippage padding) required to buy `usdcAmount` USDC, rounded up.
+    /// @notice Returns oracle-fair WETH needed to buy `usdcAmount` USDC, with no slippage padding.
+    /// @dev Resolves Aave's current oracle at call time and rounds up to avoid underestimating WETH.
     function oracleWethForUsdc(uint256 usdcAmount) public view returns (uint256) {
         address currentOracle = ADDRESSES_PROVIDER.getPriceOracle();
         if (currentOracle == address(0) || currentOracle.code.length == 0) revert InvalidCurrentOracle();
@@ -511,7 +554,8 @@ contract AaveEmergencyRepayer {
         );
     }
 
-    /// @notice Maximum WETH the emergency swap may spend, based on Aave's oracle plus immutable slippage.
+    /// @notice Returns the maximum WETH the emergency swap may spend for a target USDC amount.
+    /// @dev Adds immutable slippage padding to the Aave-oracle fair value and rounds up.
     function maxWethForUsdc(uint256 usdcAmount) public view returns (uint256) {
         return Math.mulDiv(
             oracleWethForUsdc(usdcAmount),
@@ -521,14 +565,20 @@ contract AaveEmergencyRepayer {
         );
     }
 
+    /// @notice Returns the oracle-expected aWETH collateral needed for a USDC target plus flash premium.
+    /// @dev This is informational; execution prechecks the stricter worst-case collateral amount.
     function expectedCollateralForUsdc(uint256 usdcAmount, uint256 flashWethAmount) public view returns (uint256) {
         return oracleWethForUsdc(usdcAmount) + flashPremiumFor(flashWethAmount);
     }
 
+    /// @notice Returns worst-case aWETH collateral needed if the swap spends the full flash amount.
+    /// @dev Used for prechecking owner balance and allowance before starting the flash loan.
     function worstCaseCollateralForFlash(uint256 flashWethAmount) public view returns (uint256) {
         return flashWethAmount + flashPremiumFor(flashWethAmount);
     }
 
+    /// @notice Returns Aave flash-loan premium owed for a WETH flash-loan amount.
+    /// @dev Reads Aave's current premium and rounds up.
     function flashPremiumFor(uint256 flashWethAmount) public view returns (uint256) {
         uint256 premiumBps = uint256(AAVE_POOL.FLASHLOAN_PREMIUM_TOTAL());
         return Math.mulDiv(
@@ -539,6 +589,8 @@ contract AaveEmergencyRepayer {
         );
     }
 
+    /// @notice Returns all key values needed to know whether the emergency path is currently executable.
+    /// @dev Frontends and keeper scripts use this to avoid sending transactions that would revert.
     function previewEmergency()
         external
         view
@@ -577,6 +629,8 @@ contract AaveEmergencyRepayer {
     // Fixed-destination dust recovery
     // -------------------------------------------------------------------------
 
+    /// @notice Sends any loose native USDC held by this contract to `POSITION_OWNER`.
+    /// @dev Fixed-destination recovery only; cannot send to arbitrary recipients.
     function sweepUsdc() external onlyPositionOwner {
         uint256 amount = USDC.balanceOf(address(this));
         if (amount != 0) {
@@ -585,6 +639,8 @@ contract AaveEmergencyRepayer {
         }
     }
 
+    /// @notice Sends any loose WETH held by this contract to `POSITION_OWNER`.
+    /// @dev Fixed-destination recovery only; cannot send to arbitrary recipients.
     function sweepWeth() external onlyPositionOwner {
         uint256 amount = WETH.balanceOf(address(this));
         if (amount != 0) {
@@ -593,6 +649,19 @@ contract AaveEmergencyRepayer {
         }
     }
 
+    /// @notice Sends any loose native ETH held by this contract to `POSITION_OWNER`.
+    /// @dev Covers forced or accidental ETH balances; reverts if the ETH transfer fails.
+    function sweepEth() external onlyPositionOwner {
+        uint256 amount = address(this).balance;
+        if (amount != 0) {
+            (bool success,) = payable(POSITION_OWNER).call{value: amount}("");
+            if (!success) revert NativeEthSweepFailed();
+            emit Swept(address(0), POSITION_OWNER, amount);
+        }
+    }
+
+    /// @notice Sends leftover WETH and USDC dust to `POSITION_OWNER` after a completed emergency repayment.
+    /// @dev Does not sweep native ETH automatically because the emergency path does not use native ETH.
     function _sweepLooseBalances() private {
         uint256 usdcDust = USDC.balanceOf(address(this));
         if (usdcDust != 0) {

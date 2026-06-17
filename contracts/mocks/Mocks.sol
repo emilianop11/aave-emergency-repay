@@ -281,6 +281,8 @@ contract MockRouter {
             );
         } else if (reentryMode == 6) {
             data = abi.encodeWithSignature("deleverWithCollateral(uint256)", 1);
+        } else if (reentryMode == 7) {
+            data = abi.encodeWithSignature("sweepEth()");
         }
         (lastReentrySuccess,) = reentryTarget.call(data);
     }

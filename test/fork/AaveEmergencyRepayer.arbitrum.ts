@@ -86,6 +86,15 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       [
         "function deposit() payable",
         "function approve(address,uint256) returns (bool)",
+        "function transfer(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const usdc = new ethers.Contract(
+      ARBITRUM.USDC,
+      [
+        "function transfer(address,uint256) returns (bool)",
         "function balanceOf(address) view returns (uint256)",
       ],
       positionOwner,
@@ -120,6 +129,17 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     await pool.supply(ARBITRUM.WETH, collateral, positionOwner.address, 0);
     await pool.borrow(ARBITRUM.USDC, debt, 2, 0, positionOwner.address);
 
+    const looseUsdc = ethers.parseUnits("3", 6);
+    const looseWeth = ethers.parseEther("0.01");
+    const looseEth = ethers.parseEther("0.02");
+    await usdc.transfer(repayerAddress, looseUsdc);
+    await weth.deposit({ value: looseWeth });
+    await weth.transfer(repayerAddress, looseWeth);
+    await networkHelpers.setBalance(repayerAddress, looseEth);
+    expect(await usdc.balanceOf(repayerAddress)).to.equal(looseUsdc);
+    expect(await weth.balanceOf(repayerAddress)).to.equal(looseWeth);
+    expect(await ethers.provider.getBalance(repayerAddress)).to.equal(looseEth);
+
     const ownerDebtBefore = await debtToken.balanceOf(positionOwner.address);
     const ownerAWethBefore = await aWeth.balanceOf(positionOwner.address);
     expect(ownerDebtBefore).to.be.gte(debt);
@@ -153,6 +173,24 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     expect(await aWeth.balanceOf(positionOwner.address)).to.be.gt(0n);
     expect(await debtToken.balanceOf(repayerAddress)).to.equal(0n);
     expect(await aWeth.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await usdc.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await ethers.provider.getBalance(repayerAddress)).to.equal(looseEth);
+    await expect(repayer.connect(keeper).sweepEth())
+      .to.be.revertedWithCustomError(repayer, "Unauthorized");
+    await expect(repayer.connect(positionOwner).sweepEth())
+      .to.changeEtherBalances(ethers, [repayer, positionOwner], [-looseEth, looseEth]);
+    expect(await ethers.provider.getBalance(repayerAddress)).to.equal(0n);
+
+    const manualUsdcDust = ethers.parseUnits("1", 6);
+    const manualWethDust = ethers.parseEther("0.005");
+    await usdc.transfer(repayerAddress, manualUsdcDust);
+    await weth.deposit({ value: manualWethDust });
+    await weth.transfer(repayerAddress, manualWethDust);
+    await repayer.connect(positionOwner).sweepUsdc();
+    await repayer.connect(positionOwner).sweepWeth();
+    expect(await usdc.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
     expect(await repayer.currentDebtUsdc()).to.equal(0n);
   });
 

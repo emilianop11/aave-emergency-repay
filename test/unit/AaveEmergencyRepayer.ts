@@ -894,6 +894,7 @@ describe("AaveEmergencyRepayer", function () {
       [4, "checkAndRepay"],
       [5, "executeOperation"],
       [6, "deleted deleverWithCollateral"],
+      [7, "sweepEth"],
     ] as const) {
       it(`does not let a malicious router reenter ${label} during the swap`, async function () {
         const { keeper, repayer, router, variableDebtUsdc } = await openApproveAndTrigger();
@@ -908,42 +909,53 @@ describe("AaveEmergencyRepayer", function () {
   });
 
   describe("fixed-destination dust recovery", function () {
-    it("lets only POSITION_OWNER sweep loose WETH and USDC to itself", async function () {
+    it("lets only POSITION_OWNER sweep loose WETH, USDC, and native ETH to itself", async function () {
       const { positionOwner, stranger, repayer, weth, usdc } =
         await networkHelpers.loadFixture(deployFixture);
       const repayerAddress = await repayer.getAddress();
       const wethDust = ethers.parseEther("0.2");
       const usdcDust = ethers.parseUnits("50", 6);
+      const ethDust = ethers.parseEther("0.05");
       await weth.mint(repayerAddress, wethDust);
       await usdc.mint(repayerAddress, usdcDust);
+      await networkHelpers.setBalance(repayerAddress, ethDust);
 
       await expect(repayer.connect(stranger).sweepWeth())
         .to.be.revertedWithCustomError(repayer, "Unauthorized");
       await expect(repayer.connect(stranger).sweepUsdc())
+        .to.be.revertedWithCustomError(repayer, "Unauthorized");
+      await expect(repayer.connect(stranger).sweepEth())
         .to.be.revertedWithCustomError(repayer, "Unauthorized");
 
       const wethBefore = await weth.balanceOf(positionOwner.address);
       const usdcBefore = await usdc.balanceOf(positionOwner.address);
       await repayer.connect(positionOwner).sweepWeth();
       await repayer.connect(positionOwner).sweepUsdc();
+      await expect(repayer.connect(positionOwner).sweepEth())
+        .to.changeEtherBalances(ethers, [repayer, positionOwner], [-ethDust, ethDust]);
 
       expect(await weth.balanceOf(positionOwner.address)).to.equal(wethBefore + wethDust);
       expect(await usdc.balanceOf(positionOwner.address)).to.equal(usdcBefore + usdcDust);
       expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
       expect(await usdc.balanceOf(repayerAddress)).to.equal(0n);
+      expect(await ethers.provider.getBalance(repayerAddress)).to.equal(0n);
     });
 
     it("does not let the keeper move loose funds directly", async function () {
       const { keeper, repayer, weth, usdc } = await networkHelpers.loadFixture(deployFixture);
       await weth.mint(await repayer.getAddress(), ethers.parseEther("1"));
       await usdc.mint(await repayer.getAddress(), ethers.parseUnits("1", 6));
+      await networkHelpers.setBalance(await repayer.getAddress(), ethers.parseEther("0.01"));
 
       await expect(repayer.connect(keeper).sweepWeth())
         .to.be.revertedWithCustomError(repayer, "Unauthorized");
       await expect(repayer.connect(keeper).sweepUsdc())
         .to.be.revertedWithCustomError(repayer, "Unauthorized");
+      await expect(repayer.connect(keeper).sweepEth())
+        .to.be.revertedWithCustomError(repayer, "Unauthorized");
       expect(await weth.balanceOf(await repayer.getAddress())).to.equal(ethers.parseEther("1"));
       expect(await usdc.balanceOf(await repayer.getAddress())).to.equal(ethers.parseUnits("1", 6));
+      expect(await ethers.provider.getBalance(await repayer.getAddress())).to.equal(ethers.parseEther("0.01"));
     });
   });
 });

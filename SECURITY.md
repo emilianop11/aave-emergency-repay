@@ -32,7 +32,7 @@ There is no ParaSwap, Augustus, generic aggregator, proxy, upgradeable controlle
 - Pre-flight balance and allowance must cover worst-case collateral: `maxFlashWeth + maxPremium`.
 - The aWETH transfer requests `wethSpent + flashPremium`; if aToken rounding makes the received amount slightly higher, the higher received amount is withdrawn and reported.
 - The controller verifies that the Aave withdraw returned at least the full aWETH amount received by the controller.
-- All WETH/USDC dust goes only to `POSITION_OWNER`.
+- All loose WETH, USDC, and native ETH recovery goes only to `POSITION_OWNER`.
 
 ## Principal failure modes
 

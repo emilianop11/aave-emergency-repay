@@ -30,7 +30,7 @@
 - [ ] Exercise or review the fork test for a looped position repaid through owner-only `forceRepayAll()`
 - [ ] Confirm remaining native-USDC variable debt is exactly zero after the test execution
 - [ ] Confirm residual aWETH remains with `POSITION_OWNER`
-- [ ] Confirm the contract has no aWETH and no variable USDC debt
+- [ ] Confirm the contract has no aWETH, variable USDC debt, WETH, USDC, or native ETH
 - [ ] Redeploy for the final position if the test deployment should not be reused
 - [ ] Fund keeper with Arbitrum ETH
 - [ ] Configure independent HF alerts

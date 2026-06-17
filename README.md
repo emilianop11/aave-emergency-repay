@@ -48,6 +48,7 @@ remaining aWETH stays in POSITION_OWNER
 The order is intentional: the contract never takes aWETH before the debt repay succeeds. Any failure reverts the whole transaction.
 The pre-check is conservative and requires enough owner aWETH balance/allowance for `maxFlashWeth + maxPremium`; the callback rechecks balance/allowance and requests only the actual `wethSpent + premium`. If aToken rounding makes the received/withdrawn amount slightly higher, the extra WETH is swept to `POSITION_OWNER`.
 The callback also validates token balance deltas around the swap and withdraw, so execution does not rely only on external return values.
+Loose WETH and USDC are swept to `POSITION_OWNER` after emergency execution. `POSITION_OWNER` can also manually recover loose WETH, USDC, or native ETH through fixed-destination sweep functions; there is still no generic arbitrary-token sweep.
 
 ## Security Model
 
@@ -175,7 +176,7 @@ UNISWAP_WETH_USDC_POOL=0xC6962004f452bE9203591991D15f6b388e09E8D0 \
 npm run test:fork
 ```
 
-The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, plus a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`.
+The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, fixed-destination recovery of loose WETH/USDC/native ETH, plus a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`.
 
 ## Current Arbitrum Configuration
 
