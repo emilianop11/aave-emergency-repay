@@ -1,0 +1,38 @@
+# Deployment checklist
+
+- [ ] `npm ci`
+- [ ] `npm run compile`
+- [ ] `npm run typecheck`
+- [ ] `npm test`
+- [ ] `npm run coverage`
+- [ ] Set a reliable `ARBITRUM_RPC_URL`
+- [ ] `npm run test:fork`
+- [ ] `npm run verify:arbitrum`
+- [ ] Confirm debt is native USDC, not USDC.e
+- [ ] Confirm Aave `ADDRESSES_PROVIDER` and current oracle have code in `verify:arbitrum` output
+- [ ] Set `UNISWAP_WETH_USDC_POOL` to the audited pool address
+- [ ] Confirm `router.factory()` resolves the same pool through `factory.getPool(WETH, USDC, fee)`
+- [ ] Confirm pool `token0`, `token1`, `fee` and `factory` match the deployment invariant
+- [ ] Confirm the chosen Uniswap fee tier has adequate current liquidity
+- [ ] Confirm `POSITION_OWNER_ADDRESS` is the dedicated hardware wallet/EOA that owns only the intended Aave WETH/native-USDC strategy
+- [ ] Confirm disposable `KEEPER_ADDRESS`
+- [ ] Confirm `KEEPER_ADDRESS` is different from `POSITION_OWNER_ADDRESS`
+- [ ] Confirm production trigger HF is strictly above 1
+- [ ] Confirm maximum slippage is between 1 and 500 bps
+- [ ] Confirm USDC repay buffer is greater than 0 and at most 10 native USDC
+- [ ] Deploy with the production build profile
+- [ ] Verify every immutable getter after deployment
+- [ ] Verify `UNISWAP_POOL()` equals the configured audited pool
+- [ ] Create a small Aave position directly from `POSITION_OWNER`
+- [ ] Approve aWETH to the emergency contract from `POSITION_OWNER` for at least `previewEmergency().worstCaseCollateralNeeded`, or approve max
+- [ ] Confirm `previewEmergency().readyToExecute` is true for the small test position before executing
+- [ ] Exercise `forceRepayAll()` with the small EOA-owned position
+- [ ] Exercise or review the fork test for a looped position repaid through owner-only `forceRepayAll()`
+- [ ] Confirm remaining native-USDC variable debt is exactly zero after the test execution
+- [ ] Confirm residual aWETH remains with `POSITION_OWNER`
+- [ ] Confirm the contract has no aWETH and no variable USDC debt
+- [ ] Redeploy for the final position if the test deployment should not be reused
+- [ ] Fund keeper with Arbitrum ETH
+- [ ] Configure independent HF alerts
+- [ ] Configure cron/server health monitoring
+- [ ] Obtain independent code review before significant capital

@@ -1,0 +1,46 @@
+{
+  "name": "aave-emergency-repay-hardhat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal immutable Aave V3 emergency debt repayer for WETH/native USDC on Arbitrum",
+  "license": "MIT",
+  "scripts": {
+    "compile": "hardhat build",
+    "typecheck": "hardhat build && tsc --noEmit",
+    "test": "hardhat test mocha test/unit/AaveEmergencyRepayer.ts",
+    "test:all": "hardhat test mocha",
+    "test:fork": "hardhat test mocha test/fork/AaveEmergencyRepayer.arbitrum.ts",
+    "coverage": "hardhat test mocha test/unit/AaveEmergencyRepayer.ts --coverage",
+    "deploy:arbitrum": "hardhat --network arbitrum --build-profile production run scripts/deploy.ts",
+    "keeper:arbitrum": "hardhat --network arbitrum run scripts/keeper-check.ts",
+    "verify:arbitrum": "hardhat --network arbitrum run scripts/verify-config.ts",
+    "approve-aweth-calldata": "tsx scripts/approve-aweth-calldata.ts"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.6.1"
+  },
+  "devDependencies": {
+    "@types/chai": "5.2.3",
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.15.30",
+    "chai": "6.2.2",
+    "dotenv": "16.5.0",
+    "ethers": "6.16.0",
+    "hardhat": "3.9.0",
+    "mocha": "11.7.5",
+    "solc": "0.8.24",
+    "typescript": "6.0.3",
+    "@nomicfoundation/hardhat-ethers": "4.0.13",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "3.0.10",
+    "@nomicfoundation/hardhat-mocha": "3.0.21",
+    "@nomicfoundation/hardhat-network-helpers": "3.0.10",
+    "@nomicfoundation/hardhat-typechain": "3.1.1"
+  },
+  "overrides": {
+    "glob": "13.0.6"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
