@@ -1,6 +1,6 @@
 import { network } from "hardhat";
 import { ARBITRUM } from "./addresses.js";
-import { configuredUniswapPool } from "./config.js";
+import { configuredUniswapPool, configuredUniswapPoolFee } from "./config.js";
 import { printVerifiedUniswapPool, verifyConfiguredUniswapPool } from "./uniswap-pool.js";
 
 const { ethers } = await network.create();
@@ -11,7 +11,7 @@ if (networkInfo.chainId !== ARBITRUM.chainId) {
   throw new Error(`Expected Arbitrum chainId 42161, got ${networkInfo.chainId}`);
 }
 
-const addresses = Object.entries(ARBITRUM).filter(([key]) => key !== "chainId");
+const addresses = Object.entries(ARBITRUM).filter(([, value]) => typeof value === "string");
 for (const [name, address] of addresses) {
   const code = await provider.getCode(address as string);
   if (code === "0x") throw new Error(`${name} has no contract code at ${address}`);
@@ -49,6 +49,6 @@ const verifiedPool = await verifyConfiguredUniswapPool(provider, {
   weth: ARBITRUM.WETH,
   usdc: ARBITRUM.USDC,
   uniswapPool: configuredUniswapPool(),
-  uniswapPoolFee: Number(process.env.UNISWAP_POOL_FEE ?? "500"),
+  uniswapPoolFee: configuredUniswapPoolFee(),
 });
 printVerifiedUniswapPool(verifiedPool);

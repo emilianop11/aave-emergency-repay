@@ -18,8 +18,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
-    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
 
     const codeChecks = [
       ARBITRUM.AAVE_POOL,
@@ -54,12 +53,12 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       weth: ARBITRUM.WETH,
       usdc: ARBITRUM.USDC,
       uniswapPool: configuredUniswapPool,
-      uniswapPoolFee: 500,
+      uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
     });
     expect(verifiedPool.configuredPool).to.equal(ethers.getAddress(configuredUniswapPool));
     expect(verifiedPool.derivedPool).to.equal(verifiedPool.configuredPool);
     expect(verifiedPool.poolFactory).to.equal(verifiedPool.factory);
-    expect(verifiedPool.fee).to.equal(500);
+    expect(verifiedPool.fee).to.equal(ARBITRUM.UNISWAP_WETH_USDC_500_FEE);
 
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
@@ -71,7 +70,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       positionOwner: positionOwner.address,
       keeper: keeper.address,
       uniswapPool: ethers.getAddress(configuredUniswapPool),
-      uniswapPoolFee: 500,
+      uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       // Deliberately high on the fork so checkAndRepay can be exercised without oracle manipulation.
       triggerHealthFactor: ethers.parseUnits("10", 18),
@@ -202,8 +201,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
-    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
 
     const aavePoolView = new ethers.Contract(
       ARBITRUM.AAVE_POOL,
@@ -221,7 +219,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       positionOwner: positionOwner.address,
       keeper: keeper.address,
       uniswapPool: ethers.getAddress(configuredUniswapPool),
-      uniswapPoolFee: 500,
+      uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       triggerHealthFactor: ethers.parseUnits("1.10", 18),
       usdcRepayBuffer: ethers.parseUnits("1", 6),
@@ -293,7 +291,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     await swapRouter.exactInputSingle({
       tokenIn: ARBITRUM.USDC,
       tokenOut: ARBITRUM.WETH,
-      fee: 500,
+      fee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       recipient: positionOwner.address,
       deadline: ethers.MaxUint256,
       amountIn: loopBorrow,
@@ -342,8 +340,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
-    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
 
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
@@ -355,7 +352,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       positionOwner: positionOwner.address,
       keeper: keeper.address,
       uniswapPool: ethers.getAddress(configuredUniswapPool),
-      uniswapPoolFee: 500,
+      uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       triggerHealthFactor: ethers.parseUnits("1.10", 18),
       usdcRepayBuffer: ethers.parseUnits("1", 6),
@@ -433,8 +430,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
-    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
 
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
@@ -446,7 +442,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       positionOwner: positionOwner.address,
       keeper: keeper.address,
       uniswapPool: ethers.getAddress(configuredUniswapPool),
-      uniswapPoolFee: 500,
+      uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       // Deliberately high on the fork so the lower-trigger path is exercised without oracle manipulation.
       triggerHealthFactor: ethers.parseUnits("10", 18),
@@ -515,7 +511,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     await swapRouter.exactInputSingle({
       tokenIn: ARBITRUM.USDC,
       tokenOut: ARBITRUM.WETH,
-      fee: 500,
+      fee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       recipient: positionOwner.address,
       deadline: ethers.MaxUint256,
       amountIn: loopBorrow,
@@ -559,8 +555,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
-    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
 
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
@@ -572,7 +567,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       positionOwner: positionOwner.address,
       keeper: keeper.address,
       uniswapPool: ethers.getAddress(configuredUniswapPool),
-      uniswapPoolFee: 500,
+      uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       triggerHealthFactor: ethers.parseUnits("1.10", 18),
       usdcRepayBuffer: ethers.parseUnits("1", 6),
@@ -640,7 +635,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     await swapRouter.exactInputSingle({
       tokenIn: ARBITRUM.USDC,
       tokenOut: ARBITRUM.WETH,
-      fee: 500,
+      fee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       recipient: positionOwner.address,
       deadline: ethers.MaxUint256,
       amountIn: loopBorrow,

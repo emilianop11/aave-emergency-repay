@@ -36,7 +36,7 @@ export function deploymentConfig() {
     positionOwner,
     keeper,
     uniswapPool: configuredUniswapPool(),
-    uniswapPoolFee: Number(process.env.UNISWAP_POOL_FEE ?? "500"),
+    uniswapPoolFee: configuredUniswapPoolFee(),
     maxSlippageBps,
     triggerHealthFactor: ethers.parseUnits(process.env.TRIGGER_HF ?? "1.10", 18),
     usdcRepayBuffer,
@@ -44,7 +44,13 @@ export function deploymentConfig() {
 }
 
 export function configuredUniswapPool(): string {
-  return ethers.getAddress(required("UNISWAP_WETH_USDC_POOL"));
+  return ethers.getAddress(process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL);
+}
+
+export function configuredUniswapPoolFee(): number {
+  const fee = Number(process.env.UNISWAP_POOL_FEE ?? String(ARBITRUM.UNISWAP_WETH_USDC_500_FEE));
+  if (!Number.isInteger(fee) || fee <= 0) throw new Error("UNISWAP_POOL_FEE must be a positive integer");
+  return fee;
 }
 
 export function repayerAddress(): string {

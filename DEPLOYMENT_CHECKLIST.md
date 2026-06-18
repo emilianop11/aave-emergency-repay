@@ -10,7 +10,7 @@
 - [ ] `npm run verify:arbitrum`
 - [ ] Confirm debt is native USDC, not USDC.e
 - [ ] Confirm Aave `ADDRESSES_PROVIDER` and current oracle have code in `verify:arbitrum` output
-- [ ] Set `UNISWAP_WETH_USDC_POOL` to the audited pool address
+- [ ] Confirm `scripts/addresses.ts` has the audited Arbitrum WETH/native-USDC 0.05% pool address
 - [ ] Confirm `router.factory()` resolves the same pool through `factory.getPool(WETH, USDC, fee)`
 - [ ] Confirm pool `token0`, `token1`, `fee` and `factory` match the deployment invariant
 - [ ] Confirm the chosen Uniswap fee tier has adequate current liquidity
@@ -31,6 +31,7 @@
 - [ ] Exercise `forceRepayAll()` with the small EOA-owned position
 - [ ] Exercise or review the fork test for a looped position repaid through owner-only `forceRepayAll()`
 - [ ] Exercise or review the fork test for an upper-HF-triggered close through `checkAndRepay()`
+- [ ] Exercise or review the fork tests for looped positions repaid by keeper `checkAndRepay()` through both lower-HF and upper-HF triggers
 - [ ] Confirm remaining native-USDC variable debt is exactly zero after the test execution
 - [ ] Confirm residual aWETH remains with `POSITION_OWNER`
 - [ ] Confirm the contract has no aWETH, variable USDC debt, WETH, USDC, or native ETH

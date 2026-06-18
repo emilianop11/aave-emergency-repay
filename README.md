@@ -137,7 +137,7 @@ Submit the printed calldata to the aWETH contract from a hardware wallet, Arbisc
 
 ## Explicit Uniswap Pool Invariant
 
-The WETH/USDC pool address is configured explicitly as `UNISWAP_WETH_USDC_POOL`.
+The WETH/USDC pool address is fixed in `scripts/addresses.ts` as the Arbitrum WETH/native-USDC 0.05% pool. `UNISWAP_WETH_USDC_POOL` and `UNISWAP_POOL_FEE` are optional overrides for non-standard testing only.
 
 The constructor verifies:
 
@@ -189,23 +189,25 @@ npm run coverage
 Set `ARBITRUM_RPC_URL` and run:
 
 ```bash
-ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc \
-UNISWAP_WETH_USDC_POOL=0xC6962004f452bE9203591991D15f6b388e09E8D0 \
-npm run test:fork
+ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc npm run test:fork
 ```
 
 The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, fixed-destination recovery of loose WETH/USDC/native ETH, a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`, an upper-HF-triggered close through the same keeper polling endpoint, and looped-position closes by keeper for both lower-HF and upper-HF triggers.
 
 ## Current Arbitrum Configuration
 
+- Chain ID: `42161`
+- Aave Pool Addresses Provider: `0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb`
 - Aave Pool: `0x794a61358D6845594F94dc1DB02A252b5b4814aD`
 - Aave price oracle: resolved dynamically from the pool's `ADDRESSES_PROVIDER`
 - WETH: `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1`
 - aWETH: `0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8`
 - native USDC: `0xaf88d065e77c8cC2239327C5EDb3A432268e5831`
 - variable-debt native USDC: `0xf611aEb5013fD2c0511c9CD55c7dc5C1140741A6`
+- Uniswap V3 Factory: `0x1F98431c8aD98523631AE4a59f267346ea31F984`
 - Uniswap V3 SwapRouter: `0xE592427A0AEce92De3Edee1F18E0157C05861564`
 - Uniswap V3 WETH/USDC 0.05% pool: `0xC6962004f452bE9203591991D15f6b388e09E8D0`
+- Uniswap V3 WETH/USDC pool fee: `500`
 
 ## Deploy
 
@@ -216,11 +218,11 @@ ARBITRUM_RPC_URL=
 DEPLOYER_PRIVATE_KEY=
 POSITION_OWNER_ADDRESS=
 KEEPER_ADDRESS=
-UNISWAP_WETH_USDC_POOL=0xC6962004f452bE9203591991D15f6b388e09E8D0
-UNISWAP_POOL_FEE=500
 MAX_SLIPPAGE_BPS=300
 USDC_REPAY_BUFFER=1
 ```
+
+`POSITION_OWNER_ADDRESS` is required because the contract must know which Aave account to monitor, whose native-USDC debt to repay, whose aWETH allowance/balance to use, and where to send all fixed-destination sweeps. `KEEPER_ADDRESS` is the only operational wallet you choose for polling `checkAndRepay()`.
 
 Verify dependencies:
 
