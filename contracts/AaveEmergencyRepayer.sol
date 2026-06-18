@@ -141,6 +141,7 @@ contract AaveEmergencyRepayer {
     uint256 private constant USDC_SCALE = 1e6;
     uint256 private constant MAX_ALLOWED_SLIPPAGE_BPS = 500;
     uint256 private constant MAX_USDC_REPAY_BUFFER = 10 * USDC_SCALE;
+    uint16 public constant MIN_UPPER_HEALTH_FACTOR_DISTANCE_BPS = 500;
 
     IAavePool public immutable AAVE_POOL;
     IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
@@ -159,6 +160,8 @@ contract AaveEmergencyRepayer {
     uint16 public immutable MAX_SLIPPAGE_BPS;
     uint256 public immutable TRIGGER_HEALTH_FACTOR;
     uint256 public immutable USDC_REPAY_BUFFER;
+
+    uint256 public upperHealthFactor;
 
     bool private flashActive;
 
@@ -209,6 +212,12 @@ contract AaveEmergencyRepayer {
     error UnexpectedATokenTransferAmount(uint256 received, uint256 expected);
     error UnexpectedWithdrawAmount(uint256 withdrawn, uint256 expected);
     error NativeEthSweepFailed();
+    error UpperHealthFactorTooClose(
+        uint256 currentHealthFactor,
+        uint256 newUpperHealthFactor,
+        uint256 minimumUpperHealthFactor
+    );
+    error HealthFactorInRange(uint256 currentHealthFactor, uint256 lowerTrigger, uint256 upperTrigger);
 
     event EmergencyRepayStarted(
         address indexed positionOwner,
@@ -226,6 +235,7 @@ contract AaveEmergencyRepayer {
         uint256 remainingOwnerDebt
     );
     event Swept(address indexed token, address indexed to, uint256 amount);
+    event UpperHealthFactorUpdated(uint256 oldUpperHealthFactor, uint256 newUpperHealthFactor);
 
     modifier onlyPositionOwner() {
         if (msg.sender != POSITION_OWNER) revert Unauthorized();
@@ -364,14 +374,37 @@ contract AaveEmergencyRepayer {
     // Emergency path
     // -------------------------------------------------------------------------
 
-    /// @notice Executes the emergency full repayment when the owner's Aave health factor is at or below trigger.
-    /// @dev Callable only by `KEEPER` or `POSITION_OWNER`; the caller cannot choose tokens, routes, or amounts.
+    /// @notice Executes full repayment when owner HF is below the lower trigger or above the active upper trigger.
+    /// @dev Callable only by `KEEPER` or `POSITION_OWNER`; callers cannot choose tokens, routes, or amounts.
     function checkAndRepay() external onlyKeeperOrPositionOwner {
         uint256 hf = healthFactor();
-        if (hf > TRIGGER_HEALTH_FACTOR) {
-            revert HealthFactorStillSafe(hf, TRIGGER_HEALTH_FACTOR);
+        if (!_shouldRepayAtHealthFactor(hf)) {
+            if (upperHealthFactor == 0) revert HealthFactorStillSafe(hf, TRIGGER_HEALTH_FACTOR);
+            revert HealthFactorInRange(hf, TRIGGER_HEALTH_FACTOR, upperHealthFactor);
         }
         _repayAllDebtWithCollateral(hf);
+    }
+
+    /// @notice Sets or disables the upper health-factor trigger used by `checkAndRepay()`.
+    /// @dev A nonzero upper trigger must be at least 5% above the current live Aave HF.
+    function setUpperHealthFactor(uint256 newUpperHealthFactor) external onlyKeeperOrPositionOwner {
+        if (newUpperHealthFactor != 0) {
+            uint256 currentHf = healthFactor();
+            uint256 minimumByDistance = Math.mulDiv(
+                currentHf,
+                BPS + MIN_UPPER_HEALTH_FACTOR_DISTANCE_BPS,
+                BPS,
+                Math.Rounding.Ceil
+            );
+            uint256 minimumUpperHealthFactor = Math.max(minimumByDistance, TRIGGER_HEALTH_FACTOR + 1);
+            if (newUpperHealthFactor < minimumUpperHealthFactor) {
+                revert UpperHealthFactorTooClose(currentHf, newUpperHealthFactor, minimumUpperHealthFactor);
+            }
+        }
+
+        uint256 oldUpperHealthFactor = upperHealthFactor;
+        upperHealthFactor = newUpperHealthFactor;
+        emit UpperHealthFactorUpdated(oldUpperHealthFactor, newUpperHealthFactor);
     }
 
     /// @notice Lets `POSITION_OWNER` execute the same full repayment even before the trigger is reached.
@@ -416,6 +449,12 @@ contract AaveEmergencyRepayer {
         flashActive = false;
         WETH.forceApprove(address(AAVE_POOL), 0);
         _sweepLooseBalances();
+    }
+
+    /// @notice Returns whether the given HF should trigger a full repayment through `checkAndRepay()`.
+    /// @dev The lower trigger is always active; the upper trigger is active only when nonzero.
+    function _shouldRepayAtHealthFactor(uint256 hf) private view returns (bool) {
+        return hf <= TRIGGER_HEALTH_FACTOR || (upperHealthFactor != 0 && hf >= upperHealthFactor);
     }
 
     /// @notice Aave V3 `flashLoanSimple` callback that swaps WETH, repays USDC debt, and returns flash liquidity.
@@ -619,7 +658,7 @@ contract AaveEmergencyRepayer {
         }
         ownerAWethBalance = A_WETH.balanceOf(POSITION_OWNER);
         ownerAWethAllowance = A_WETH.allowance(POSITION_OWNER, address(this));
-        triggerReached = debtUsdc != 0 && hf <= TRIGGER_HEALTH_FACTOR;
+        triggerReached = debtUsdc != 0 && _shouldRepayAtHealthFactor(hf);
         sufficientlyFunded = ownerAWethBalance >= worstCaseCollateralNeeded;
         sufficientlyApproved = ownerAWethAllowance >= worstCaseCollateralNeeded;
         readyToExecute = triggerReached && sufficientlyFunded && sufficientlyApproved;

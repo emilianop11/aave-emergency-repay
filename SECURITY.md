@@ -19,8 +19,10 @@ There is no ParaSwap, Augustus, generic aggregator, proxy, upgradeable controlle
 - The contract normally owns no aWETH and no variable USDC debt.
 - Only keeper or `POSITION_OWNER` can call `checkAndRepay()`.
 - `checkAndRepay()` has no parameters.
+- `checkAndRepay()` executes only when HF is at/below the immutable lower trigger or at/above the active upper trigger.
+- The upper trigger starts disabled and any nonzero setter value must be at least 5% above the current live Aave HF.
 - Only `POSITION_OWNER` can call `forceRepayAll()` and sweeps.
-- Emergency execution is blocked while `POSITION_OWNER` Aave HF is above the trigger.
+- Emergency execution is blocked while `POSITION_OWNER` Aave HF is inside the allowed lower/upper strategy band.
 - Only WETH can be flash-borrowed.
 - Only WETH can be sold and only native USDC can be received.
 - The swap recipient is the controller itself.
@@ -40,9 +42,11 @@ There is no ParaSwap, Augustus, generic aggregator, proxy, upgradeable controlle
 
 The emergency path requires prior `aWETH.approve(emergencyContract, amount)` by `POSITION_OWNER`. The allowance must cover `previewEmergency().worstCaseCollateralNeeded`; approving only the oracle-expected collateral is intentionally insufficient. Revoking allowance to zero disables the airbag.
 
-### Keeper unavailable
+### Keeper unavailable or compromised
 
 The emergency transaction is not autonomous. RPC outage, server failure, insufficient gas, nonce problems, or a lost keeper key can prevent execution. `POSITION_OWNER` remains able to call `checkAndRepay()` and `forceRepayAll()`.
+
+If the keeper key is compromised, the keeper still cannot choose recipients, routes, tokens, amounts, pools, or calldata. It can set the upper HF trigger, but any nonzero value must be at least 5% above the current live HF, which prevents setting an immediate upper-trigger close at the current HF. A compromised keeper can still cause bounded strategy griefing if the position later reaches that upper trigger.
 
 ### Aave liquidation
 
@@ -63,7 +67,7 @@ The controller is designed for a dedicated `POSITION_OWNER` EOA with WETH collat
 
 ### Configuration error
 
-All important values are immutable. A wrong `POSITION_OWNER`, keeper, token, router, pool, fee tier, trigger, slippage or debt token requires redeployment and a new aWETH approval. The current oracle is intentionally resolved from Aave's addresses provider instead of being configured directly.
+All fund-flow-critical values are immutable. A wrong `POSITION_OWNER`, keeper, token, router, pool, fee tier, lower trigger, slippage or debt token requires redeployment and a new aWETH approval. The current oracle is intentionally resolved from Aave's addresses provider instead of being configured directly.
 `USDC_REPAY_BUFFER` is immutable, must be greater than zero, and is capped at 10 native USDC.
 
 ## Review recommendations

@@ -18,6 +18,8 @@
 - [ ] Confirm disposable `KEEPER_ADDRESS`
 - [ ] Confirm `KEEPER_ADDRESS` is different from `POSITION_OWNER_ADDRESS`
 - [ ] Confirm production trigger HF is strictly above 1
+- [ ] Confirm upper HF starts disabled (`upperHealthFactor() == 0`)
+- [ ] Confirm keeper upper-HF policy uses values at least 5% above the current live HF
 - [ ] Confirm maximum slippage is between 1 and 500 bps
 - [ ] Confirm USDC repay buffer is greater than 0 and at most 10 native USDC
 - [ ] Deploy with the production build profile
@@ -28,6 +30,7 @@
 - [ ] Confirm `previewEmergency().readyToExecute` is true for the small test position before executing
 - [ ] Exercise `forceRepayAll()` with the small EOA-owned position
 - [ ] Exercise or review the fork test for a looped position repaid through owner-only `forceRepayAll()`
+- [ ] Exercise or review the fork test for an upper-HF-triggered close through `checkAndRepay()`
 - [ ] Confirm remaining native-USDC variable debt is exactly zero after the test execution
 - [ ] Confirm residual aWETH remains with `POSITION_OWNER`
 - [ ] Confirm the contract has no aWETH, variable USDC debt, WETH, USDC, or native ETH

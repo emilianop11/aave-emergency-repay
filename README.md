@@ -18,8 +18,8 @@ keeper calls checkAndRepay()
         ↓
 contract reads Aave HF for POSITION_OWNER
         ↓
-HF above trigger → revert
-HF at/below trigger → continue
+HF in safe strategy band → revert
+HF at/below lower trigger or at/above active upper trigger → continue
         ↓
 read POSITION_OWNER variable USDC debt
         ↓
@@ -63,7 +63,7 @@ Loose WETH and USDC are swept to `POSITION_OWNER` after emergency execution. `PO
 - maximum slippage, capped at 500 bps;
 - USDC repay buffer, capped at 10 native USDC.
 
-There are no setters, upgrades, arbitrary calls, dynamic routes, external calldata, ParaSwap, Augustus, generic token sweeps, or keeper-provided recipients.
+The lower trigger and all fund-flow parameters are immutable. The upper health-factor trigger starts disabled and can be updated by `KEEPER` or `POSITION_OWNER`; every nonzero value must be at least 5% above the current live Aave HF. There are no upgrades, arbitrary calls, dynamic routes, external calldata, ParaSwap, Augustus, generic token sweeps, or keeper-provided recipients.
 
 The Aave price oracle is not stored as an immutable deployment parameter. The contract resolves the current oracle through `AAVE_POOL.ADDRESSES_PROVIDER().getPriceOracle()` whenever it needs oracle pricing, and rejects a zero or non-contract current oracle.
 
@@ -84,11 +84,29 @@ The keeper can only call:
 
 ```solidity
 checkAndRepay()
+setUpperHealthFactor(uint256)
 ```
 
-It cannot choose tokens, amounts, routes, pools, routers, recipients, calldata, slippage, or a withdrawal address. If the keeper key is compromised, it cannot execute while `POSITION_OWNER` HF is above the immutable trigger.
+It cannot choose tokens, amounts, routes, pools, routers, recipients, calldata, slippage, or a withdrawal address. If the keeper key is compromised, it can configure the upper HF trigger only at least 5% above the current live HF, and it can execute `checkAndRepay()` only when the HF is at/below the immutable lower trigger or at/above the active upper trigger.
 
 `POSITION_OWNER` can also call `checkAndRepay()` and can call `forceRepayAll()` before the trigger.
+
+### Upper Health Factor Trigger
+
+`upperHealthFactor` is `0` at deployment, which disables upper-triggered closes. `KEEPER` or `POSITION_OWNER` can set it with:
+
+```solidity
+setUpperHealthFactor(newUpperHealthFactor)
+```
+
+For any nonzero value, the contract reads the current Aave HF and requires:
+
+```text
+newUpperHealthFactor >= currentHF * 1.05
+newUpperHealthFactor > lower trigger
+```
+
+The same `checkAndRepay()` endpoint is used for polling. It closes the position when HF falls below the lower emergency trigger or rises above the active upper strategy trigger.
 
 ### aWETH Allowance
 
@@ -176,7 +194,7 @@ UNISWAP_WETH_USDC_POOL=0xC6962004f452bE9203591991D15f6b388e09E8D0 \
 npm run test:fork
 ```
 
-The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, fixed-destination recovery of loose WETH/USDC/native ETH, plus a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`.
+The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, fixed-destination recovery of loose WETH/USDC/native ETH, a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`, plus an upper-HF-triggered close through the same keeper polling endpoint.
 
 ## Current Arbitrum Configuration
 
@@ -240,7 +258,7 @@ Run:
 npm run keeper:arbitrum
 ```
 
-The script first calls `previewEmergency()`. It sends `checkAndRepay()` only when the trigger is reached and the aWETH balance/allowance cover worst-case collateral.
+The script first calls `previewEmergency()`. It sends `checkAndRepay()` only when the lower or upper trigger is reached and the aWETH balance/allowance cover worst-case collateral.
 
 ## Important Limitations
 

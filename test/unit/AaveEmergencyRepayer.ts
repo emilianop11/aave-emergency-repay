@@ -146,6 +146,8 @@ describe("AaveEmergencyRepayer", function () {
       expect(await repayer.TRIGGER_HEALTH_FACTOR()).to.equal(HF_TRIGGER);
       expect(await repayer.MAX_SLIPPAGE_BPS()).to.equal(200n);
       expect(await repayer.USDC_REPAY_BUFFER()).to.equal(BUFFER);
+      expect(await repayer.MIN_UPPER_HEALTH_FACTOR_DISTANCE_BPS()).to.equal(500n);
+      expect(await repayer.upperHealthFactor()).to.equal(0n);
     });
 
     it("rejects zero addresses and identical owner/keeper", async function () {
@@ -278,7 +280,7 @@ describe("AaveEmergencyRepayer", function () {
       expect(await router.factory()).to.equal(await factory.getAddress());
     });
 
-    it("does not expose normal Aave position-management functions or mutable setters", async function () {
+    it("does not expose normal Aave position-management functions or mutable setters beyond upper HF policy", async function () {
       const factory = await ethers.getContractFactory("AaveEmergencyRepayer");
       const names: string[] = [];
       factory.interface.forEachFunction((fragment) => names.push(fragment.name));
@@ -291,7 +293,7 @@ describe("AaveEmergencyRepayer", function () {
         "borrowUsdc",
         "supplyExistingWeth",
       ]);
-      expect(names.filter((name) => name.startsWith("set"))).to.deep.equal([]);
+      expect(names.filter((name) => name.startsWith("set"))).to.deep.equal(["setUpperHealthFactor"]);
       expect(factory.interface.getFunction("checkAndRepay")?.inputs).to.have.length(0);
     });
   });
@@ -428,6 +430,74 @@ describe("AaveEmergencyRepayer", function () {
       await expect(repayer.connect(keeper).checkAndRepay())
         .to.be.revertedWithCustomError(repayer, "HealthFactorStillSafe")
         .withArgs(HF_SAFE, HF_TRIGGER);
+    });
+
+    it("lets keeper configure an upper HF only when it is at least 5% above current HF", async function () {
+      const { positionOwner, keeper, stranger, repayer, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      const currentHf = ethers.parseUnits("1.50", 18);
+      const minimumUpper = ethers.parseUnits("1.575", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+
+      await expect(repayer.connect(stranger).setUpperHealthFactor(minimumUpper))
+        .to.be.revertedWithCustomError(repayer, "Unauthorized");
+      await expect(repayer.connect(keeper).setUpperHealthFactor(minimumUpper - 1n))
+        .to.be.revertedWithCustomError(repayer, "UpperHealthFactorTooClose")
+        .withArgs(currentHf, minimumUpper - 1n, minimumUpper);
+
+      await expect(repayer.connect(keeper).setUpperHealthFactor(minimumUpper))
+        .to.emit(repayer, "UpperHealthFactorUpdated")
+        .withArgs(0n, minimumUpper);
+      expect(await repayer.upperHealthFactor()).to.equal(minimumUpper);
+    });
+
+    it("lets checkAndRepay use the active upper HF trigger through the same polling endpoint", async function () {
+      const { positionOwner, keeper, repayer, aWeth, variableDebtUsdc, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+
+      const currentHf = ethers.parseUnits("1.50", 18);
+      const upperHf = ethers.parseUnits("1.575", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+      await repayer.connect(keeper).setUpperHealthFactor(upperHf);
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), ethers.MaxUint256);
+
+      let preview = await repayer.previewEmergency();
+      expect(preview.triggerReached).to.equal(false);
+      expect(await repayer.upperHealthFactor()).to.equal(upperHf);
+      await expect(repayer.connect(keeper).checkAndRepay())
+        .to.be.revertedWithCustomError(repayer, "HealthFactorInRange")
+        .withArgs(currentHf, HF_TRIGGER, upperHf);
+
+      await pool.setUserHealthFactor(positionOwner.address, upperHf);
+      preview = await repayer.previewEmergency();
+      expect(preview.triggerReached).to.equal(true);
+
+      await repayer.connect(keeper).checkAndRepay();
+      expect(await variableDebtUsdc.balanceOf(positionOwner.address)).to.equal(0n);
+    });
+
+    it("starts with the upper HF trigger disabled and lets keeper disable it again", async function () {
+      const { positionOwner, keeper, repayer, pool, openOwnerPosition, approveWorstCaseCollateral } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      await approveWorstCaseCollateral();
+
+      const currentHf = ethers.parseUnits("1.50", 18);
+      const upperHf = ethers.parseUnits("1.575", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+      await repayer.connect(keeper).setUpperHealthFactor(upperHf);
+      await expect(repayer.connect(keeper).setUpperHealthFactor(0n))
+        .to.emit(repayer, "UpperHealthFactorUpdated")
+        .withArgs(upperHf, 0n);
+
+      const preview = await repayer.previewEmergency();
+      expect(await repayer.upperHealthFactor()).to.equal(0n);
+      expect(preview.triggerReached).to.equal(false);
+      await expect(repayer.connect(keeper).checkAndRepay())
+        .to.be.revertedWithCustomError(repayer, "HealthFactorStillSafe")
+        .withArgs(currentHf, HF_TRIGGER);
     });
 
     it("enforces keeper/owner access for checkAndRepay and owner-only access for forceRepayAll", async function () {
@@ -895,6 +965,7 @@ describe("AaveEmergencyRepayer", function () {
       [5, "executeOperation"],
       [6, "deleted deleverWithCollateral"],
       [7, "sweepEth"],
+      [8, "setUpperHealthFactor"],
     ] as const) {
       it(`does not let a malicious router reenter ${label} during the swap`, async function () {
         const { keeper, repayer, router, variableDebtUsdc } = await openApproveAndTrigger();

@@ -23,6 +23,10 @@ const [
   readyToExecute,
 ] =
   await repayer.previewEmergency();
+const activeUpperHealthFactor = await repayer.upperHealthFactor();
+const lowerHealthFactor = await repayer.TRIGGER_HEALTH_FACTOR();
+const lowerTriggerReached = debtUsdc !== 0n && hf <= lowerHealthFactor;
+const upperTriggerReached = debtUsdc !== 0n && activeUpperHealthFactor !== 0n && hf >= activeUpperHealthFactor;
 
 console.log({
   keeper: keeper.address,
@@ -36,7 +40,12 @@ console.log({
   worstCaseCollateralNeeded: ethers.formatEther(worstCaseCollateralNeeded),
   ownerAWethBalance: ethers.formatEther(ownerAWethBalance),
   ownerAWethAllowance: ethers.formatEther(ownerAWethAllowance),
+  activeUpperHealthFactor: activeUpperHealthFactor === 0n
+    ? "disabled"
+    : ethers.formatUnits(activeUpperHealthFactor, 18),
   triggerReached,
+  lowerTriggerReached,
+  upperTriggerReached,
   sufficientlyFunded,
   sufficientlyApproved,
   readyToExecute,
