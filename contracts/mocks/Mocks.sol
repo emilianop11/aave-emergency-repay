@@ -15,6 +15,14 @@ interface IFlashReceiverLike {
     ) external returns (bool);
 }
 
+interface IRepayerSweepLike {
+    function sweepEth() external;
+
+    function sweepUsdc() external;
+
+    function sweepWeth() external;
+}
+
 contract MockERC20 is ERC20 {
     uint8 private immutable customDecimals;
     bool public failTransferFrom;
@@ -285,8 +293,37 @@ contract MockRouter {
             data = abi.encodeWithSignature("sweepEth()");
         } else if (reentryMode == 8) {
             data = abi.encodeWithSignature("setUpperHealthFactor(uint256)", 1);
+        } else if (reentryMode == 9) {
+            data = abi.encodeWithSignature("setUpperHealthFactor(uint256)", 3e18);
         }
         (lastReentrySuccess,) = reentryTarget.call(data);
+    }
+}
+
+contract RejectingEthOwner {
+    function callSweepEth(address target) external {
+        IRepayerSweepLike(target).sweepEth();
+    }
+
+    receive() external payable {
+        revert("REJECT_ETH");
+    }
+}
+
+contract ReenteringEthOwner {
+    address public repayer;
+    bool public reentered;
+
+    function callSweepEth(address target) external {
+        repayer = target;
+        IRepayerSweepLike(target).sweepEth();
+    }
+
+    receive() external payable {
+        if (reentered) return;
+        reentered = true;
+        IRepayerSweepLike(repayer).sweepUsdc();
+        IRepayerSweepLike(repayer).sweepWeth();
     }
 }
 

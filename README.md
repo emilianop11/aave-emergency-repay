@@ -194,7 +194,7 @@ UNISWAP_WETH_USDC_POOL=0xC6962004f452bE9203591991D15f6b388e09E8D0 \
 npm run test:fork
 ```
 
-The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, fixed-destination recovery of loose WETH/USDC/native ETH, a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`, plus an upper-HF-triggered close through the same keeper polling endpoint.
+The fork tests create real Aave positions owned by test EOAs. They cover a simple WETH/native-USDC position repaid by keeper `checkAndRepay()`, fixed-destination recovery of loose WETH/USDC/native ETH, a looped position where borrowed USDC is swapped into more WETH collateral and then fully repaid by owner-only `forceRepayAll()`, an upper-HF-triggered close through the same keeper polling endpoint, and looped-position closes by keeper for both lower-HF and upper-HF triggers.
 
 ## Current Arbitrum Configuration
 

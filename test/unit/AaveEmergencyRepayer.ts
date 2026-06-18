@@ -280,6 +280,27 @@ describe("AaveEmergencyRepayer", function () {
       expect(await router.factory()).to.equal(await factory.getAddress());
     });
 
+    it("rejects a configured Uniswap pool whose own factory differs from the router factory", async function () {
+      const { config, weth, usdc, factory } = await networkHelpers.loadFixture(deployFixture);
+      const repayerFactory = await ethers.getContractFactory("AaveEmergencyRepayer");
+      const wrongFactory = await ethers.deployContract("MockFactory");
+      const poolWithWrongFactory = await ethers.deployContract("MockUniswapV3Pool", [
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        UNISWAP_FEE,
+        await wrongFactory.getAddress(),
+      ]);
+      await factory.setPool(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        UNISWAP_FEE,
+        await poolWithWrongFactory.getAddress(),
+      );
+
+      await expect(repayerFactory.deploy({ ...config, uniswapPool: await poolWithWrongFactory.getAddress() }))
+        .to.be.revertedWithCustomError(repayerFactory, "InvalidUniswapPoolFactory");
+    });
+
     it("does not expose normal Aave position-management functions or mutable setters beyond upper HF policy", async function () {
       const factory = await ethers.getContractFactory("AaveEmergencyRepayer");
       const names: string[] = [];
@@ -500,6 +521,89 @@ describe("AaveEmergencyRepayer", function () {
         .withArgs(currentHf, HF_TRIGGER);
     });
 
+    it("allows an absurdly high upper HF without creating an immediate close path", async function () {
+      const { positionOwner, keeper, repayer, pool, openOwnerPosition, approveWorstCaseCollateral } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      await approveWorstCaseCollateral();
+
+      const currentHf = ethers.parseUnits("1.50", 18);
+      const absurdUpperHf = ethers.parseUnits("100", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+      await repayer.connect(keeper).setUpperHealthFactor(absurdUpperHf);
+
+      expect(await repayer.upperHealthFactor()).to.equal(absurdUpperHf);
+      expect((await repayer.previewEmergency()).triggerReached).to.equal(false);
+      await expect(repayer.connect(keeper).checkAndRepay())
+        .to.be.revertedWithCustomError(repayer, "HealthFactorInRange")
+        .withArgs(currentHf, HF_TRIGGER, absurdUpperHf);
+    });
+
+    it("uses lower trigger plus one as the upper HF floor when current HF is deeply unsafe", async function () {
+      const { positionOwner, keeper, repayer, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+
+      const unsafeHf = ethers.parseUnits("0.90", 18);
+      const minimumUpper = HF_TRIGGER + 1n;
+      await pool.setUserHealthFactor(positionOwner.address, unsafeHf);
+
+      await expect(repayer.connect(keeper).setUpperHealthFactor(HF_TRIGGER))
+        .to.be.revertedWithCustomError(repayer, "UpperHealthFactorTooClose")
+        .withArgs(unsafeHf, HF_TRIGGER, minimumUpper);
+      await repayer.connect(keeper).setUpperHealthFactor(minimumUpper);
+      expect(await repayer.upperHealthFactor()).to.equal(minimumUpper);
+    });
+
+    it("reverts with NoDebt when upper trigger is reached but the owner has no USDC debt", async function () {
+      const { keeper, repayer, pool, positionOwner } = await networkHelpers.loadFixture(deployFixture);
+      const currentHf = ethers.parseUnits("2", 18);
+      const upperHf = ethers.parseUnits("2.10", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+      await repayer.connect(keeper).setUpperHealthFactor(upperHf);
+      await pool.setUserHealthFactor(positionOwner.address, upperHf);
+
+      await expect(repayer.connect(keeper).checkAndRepay())
+        .to.be.revertedWithCustomError(repayer, "NoDebt");
+    });
+
+    it("reverts before flash loan when upper trigger is reached but owner aWETH allowance is missing", async function () {
+      const { positionOwner, keeper, repayer, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+
+      const currentHf = ethers.parseUnits("1.50", 18);
+      const upperHf = ethers.parseUnits("1.575", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+      await repayer.connect(keeper).setUpperHealthFactor(upperHf);
+      await pool.setUserHealthFactor(positionOwner.address, upperHf);
+      const preview = await repayer.previewEmergency();
+
+      await expect(repayer.connect(keeper).checkAndRepay())
+        .to.be.revertedWithCustomError(repayer, "InsufficientOwnerATokenAllowance")
+        .withArgs(0n, preview.worstCaseCollateralNeeded);
+      expect(await pool.lastFlashAmount()).to.equal(0n);
+    });
+
+    it("enforces the same slippage ceiling when repayment is triggered by upper HF", async function () {
+      const { positionOwner, keeper, repayer, router, aWeth, variableDebtUsdc, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+
+      const currentHf = ethers.parseUnits("1.50", 18);
+      const upperHf = ethers.parseUnits("1.575", 18);
+      await pool.setUserHealthFactor(positionOwner.address, currentHf);
+      await repayer.connect(keeper).setUpperHealthFactor(upperHf);
+      await pool.setUserHealthFactor(positionOwner.address, upperHf);
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), ethers.MaxUint256);
+      await router.setUsdcPerWeth(1_500n * 10n ** 6n);
+      const ownerAWethBefore = await aWeth.balanceOf(positionOwner.address);
+
+      await expect(repayer.connect(keeper).checkAndRepay()).to.be.revertedWith("TOO_MUCH_IN");
+      expect(await variableDebtUsdc.balanceOf(positionOwner.address)).to.equal(DEBT);
+      expect(await aWeth.balanceOf(positionOwner.address)).to.equal(ownerAWethBefore);
+    });
+
     it("enforces keeper/owner access for checkAndRepay and owner-only access for forceRepayAll", async function () {
       const { positionOwner, keeper, stranger, repayer, pool, openOwnerPosition, approveWorstCaseCollateral } =
         await networkHelpers.loadFixture(deployFixture);
@@ -559,6 +663,40 @@ describe("AaveEmergencyRepayer", function () {
       await expect(repayer.connect(positionOwner).forceRepayAll())
         .to.be.revertedWithCustomError(repayer, "InsufficientOwnerATokenAllowance")
         .withArgs(preview.expectedCollateralNeeded, preview.worstCaseCollateralNeeded);
+      expect(await pool.lastFlashAmount()).to.equal(0n);
+    });
+
+    it("rechecks flash premium after preview and rejects a stale aWETH approval before flash loan", async function () {
+      const { positionOwner, repayer, aWeth, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      const preview = await repayer.previewEmergency();
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), preview.worstCaseCollateralNeeded);
+
+      await pool.setFlashLoanPremiumTotal(100);
+      const freshPreview = await repayer.previewEmergency();
+      expect(freshPreview.worstCaseCollateralNeeded).to.be.gt(preview.worstCaseCollateralNeeded);
+
+      await expect(repayer.connect(positionOwner).forceRepayAll())
+        .to.be.revertedWithCustomError(repayer, "InsufficientOwnerATokenAllowance")
+        .withArgs(preview.worstCaseCollateralNeeded, freshPreview.worstCaseCollateralNeeded);
+      expect(await pool.lastFlashAmount()).to.equal(0n);
+    });
+
+    it("rechecks the current oracle after preview and rejects stale collateral approval if WETH price worsens", async function () {
+      const { positionOwner, repayer, aWeth, pool, oracle, weth, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      const preview = await repayer.previewEmergency();
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), preview.worstCaseCollateralNeeded);
+
+      await oracle.setPrice(await weth.getAddress(), 1_000n * 10n ** 8n);
+      const freshPreview = await repayer.previewEmergency();
+      expect(freshPreview.worstCaseCollateralNeeded).to.be.gt(preview.worstCaseCollateralNeeded);
+
+      await expect(repayer.connect(positionOwner).forceRepayAll())
+        .to.be.revertedWithCustomError(repayer, "InsufficientOwnerATokenAllowance")
+        .withArgs(preview.worstCaseCollateralNeeded, freshPreview.worstCaseCollateralNeeded);
       expect(await pool.lastFlashAmount()).to.equal(0n);
     });
 
@@ -641,6 +779,42 @@ describe("AaveEmergencyRepayer", function () {
       expect(await weth.allowance(repayerAddress, await pool.getAddress())).to.equal(0n);
     });
 
+    it("accepts Aave repaying less than the buffered target when the owner's debt is fully cleared", async function () {
+      const { positionOwner, repayer, aWeth, variableDebtUsdc, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      const smallDebt = ethers.parseUnits("1000", 6);
+      await openOwnerPosition(TEN_WETH, smallDebt);
+      const preview = await repayer.previewEmergency();
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), preview.worstCaseCollateralNeeded);
+
+      const fairWethSpent = await repayer.oracleWethForUsdc(smallDebt + BUFFER);
+      const premium = await repayer.flashPremiumFor(preview.maxFlashWeth);
+      const aWethPulled = fairWethSpent + premium;
+
+      await expect(repayer.connect(positionOwner).forceRepayAll())
+        .to.emit(repayer, "EmergencyRepayCompleted")
+        .withArgs(positionOwner.address, smallDebt, fairWethSpent, aWethPulled, premium, TEN_WETH - aWethPulled, 0n);
+
+      expect(await variableDebtUsdc.balanceOf(positionOwner.address)).to.equal(0n);
+      expect(smallDebt).to.be.lt(smallDebt + BUFFER);
+    });
+
+    it("sweeps the unused USDC repay buffer to POSITION_OWNER after the debt is cleared", async function () {
+      const { positionOwner, repayer, usdc, aWeth, variableDebtUsdc, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      const smallDebt = ethers.parseUnits("1000", 6);
+      await openOwnerPosition(TEN_WETH, smallDebt);
+      const preview = await repayer.previewEmergency();
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), preview.worstCaseCollateralNeeded);
+      const ownerUsdcBefore = await usdc.balanceOf(positionOwner.address);
+
+      await repayer.connect(positionOwner).forceRepayAll();
+
+      expect(await variableDebtUsdc.balanceOf(positionOwner.address)).to.equal(0n);
+      expect(await usdc.balanceOf(positionOwner.address)).to.equal(ownerUsdcBefore + BUFFER);
+      expect(await usdc.balanceOf(await repayer.getAddress())).to.equal(0n);
+    });
+
     it("succeeds at a worse-but-allowed swap price and pulls no more than worst-case collateral", async function () {
       const { positionOwner, repayer, router, aWeth, variableDebtUsdc, pool, openOwnerPosition } =
         await networkHelpers.loadFixture(deployFixture);
@@ -711,6 +885,48 @@ describe("AaveEmergencyRepayer", function () {
       expect(await usdc.balanceOf(positionOwner.address)).to.equal(ownerUsdcBefore + BUFFER + usdcDust);
       expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
       expect(await usdc.balanceOf(repayerAddress)).to.equal(0n);
+    });
+
+    it("does not let pre-existing USDC dust mask a router shortpay", async function () {
+      const { positionOwner, repayer, router, usdc, aWeth, variableDebtUsdc, approveWorstCaseCollateral, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      await approveWorstCaseCollateral();
+      const repayerAddress = await repayer.getAddress();
+      const usdcDust = ethers.parseUnits("25", 6);
+      await usdc.mint(repayerAddress, usdcDust);
+      await router.setUsdcShortfall(1n);
+      const ownerAWethBefore = await aWeth.balanceOf(positionOwner.address);
+
+      await expect(repayer.connect(positionOwner).forceRepayAll())
+        .to.be.revertedWithCustomError(repayer, "UnexpectedUsdcReceived")
+        .withArgs(DEBT + BUFFER - 1n, DEBT + BUFFER);
+
+      expect(await variableDebtUsdc.balanceOf(positionOwner.address)).to.equal(DEBT);
+      expect(await aWeth.balanceOf(positionOwner.address)).to.equal(ownerAWethBefore);
+      expect(await usdc.balanceOf(repayerAddress)).to.equal(usdcDust);
+    });
+
+    it("can use pre-existing WETH dust to cover a router underreported WETH spend without trapping funds", async function () {
+      const { positionOwner, repayer, router, weth, aWeth, variableDebtUsdc, pool, openOwnerPosition } =
+        await networkHelpers.loadFixture(deployFixture);
+      await openOwnerPosition();
+      const preview = await repayer.previewEmergency();
+      await aWeth.connect(positionOwner).approve(await repayer.getAddress(), preview.worstCaseCollateralNeeded);
+      const repayerAddress = await repayer.getAddress();
+      const fairWethSpent = await repayer.oracleWethForUsdc(DEBT + BUFFER);
+      const underreportedWeth = ethers.parseEther("0.1");
+      const premium = await repayer.flashPremiumFor(preview.maxFlashWeth);
+      const aWethPulled = fairWethSpent - underreportedWeth + premium;
+      await weth.mint(repayerAddress, underreportedWeth);
+      await router.setUnderreportWeth(underreportedWeth);
+
+      await repayer.connect(positionOwner).forceRepayAll();
+
+      expect(await variableDebtUsdc.balanceOf(positionOwner.address)).to.equal(0n);
+      expect(await pool.lastWithdrawAmount()).to.equal(aWethPulled);
+      expect(await aWeth.balanceOf(positionOwner.address)).to.equal(TEN_WETH - aWethPulled);
+      expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
     });
 
     it("reverts atomically when swap price exceeds the oracle slippage ceiling", async function () {
@@ -966,6 +1182,7 @@ describe("AaveEmergencyRepayer", function () {
       [6, "deleted deleverWithCollateral"],
       [7, "sweepEth"],
       [8, "setUpperHealthFactor"],
+      [9, "setUpperHealthFactor with a valid-looking value"],
     ] as const) {
       it(`does not let a malicious router reenter ${label} during the swap`, async function () {
         const { keeper, repayer, router, variableDebtUsdc } = await openApproveAndTrigger();
@@ -1007,6 +1224,55 @@ describe("AaveEmergencyRepayer", function () {
 
       expect(await weth.balanceOf(positionOwner.address)).to.equal(wethBefore + wethDust);
       expect(await usdc.balanceOf(positionOwner.address)).to.equal(usdcBefore + usdcDust);
+      expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
+      expect(await usdc.balanceOf(repayerAddress)).to.equal(0n);
+      expect(await ethers.provider.getBalance(repayerAddress)).to.equal(0n);
+    });
+
+    it("does not accept native ETH through a plain transfer", async function () {
+      const { positionOwner, repayer } = await networkHelpers.loadFixture(deployFixture);
+      const repayerAddress = await repayer.getAddress();
+
+      await expect(positionOwner.sendTransaction({ to: repayerAddress, value: 1n })).to.be.revert(ethers);
+      expect(await ethers.provider.getBalance(repayerAddress)).to.equal(0n);
+    });
+
+    it("reverts sweepEth without losing forced ETH if POSITION_OWNER rejects native ETH", async function () {
+      const { config } = await networkHelpers.loadFixture(deployFixture);
+      const rejectingOwner = await ethers.deployContract("RejectingEthOwner");
+      const repayer = await ethers.deployContract("AaveEmergencyRepayer", [
+        { ...config, positionOwner: await rejectingOwner.getAddress() },
+      ]);
+      const repayerAddress = await repayer.getAddress();
+      const ethDust = ethers.parseEther("0.05");
+      await networkHelpers.setBalance(repayerAddress, ethDust);
+
+      await expect(rejectingOwner.callSweepEth(repayerAddress))
+        .to.be.revertedWithCustomError(repayer, "NativeEthSweepFailed");
+      expect(await ethers.provider.getBalance(repayerAddress)).to.equal(ethDust);
+    });
+
+    it("keeps ETH, USDC, and WETH recovery fixed to POSITION_OWNER during sweepEth reentry", async function () {
+      const { config, weth, usdc } = await networkHelpers.loadFixture(deployFixture);
+      const reenteringOwner = await ethers.deployContract("ReenteringEthOwner");
+      const repayer = await ethers.deployContract("AaveEmergencyRepayer", [
+        { ...config, positionOwner: await reenteringOwner.getAddress() },
+      ]);
+      const ownerAddress = await reenteringOwner.getAddress();
+      const repayerAddress = await repayer.getAddress();
+      const wethDust = ethers.parseEther("0.2");
+      const usdcDust = ethers.parseUnits("50", 6);
+      const ethDust = ethers.parseEther("0.05");
+      await weth.mint(repayerAddress, wethDust);
+      await usdc.mint(repayerAddress, usdcDust);
+      await networkHelpers.setBalance(repayerAddress, ethDust);
+
+      await expect(reenteringOwner.callSweepEth(repayerAddress))
+        .to.changeEtherBalances(ethers, [repayer, reenteringOwner], [-ethDust, ethDust]);
+
+      expect(await reenteringOwner.reentered()).to.equal(true);
+      expect(await weth.balanceOf(ownerAddress)).to.equal(wethDust);
+      expect(await usdc.balanceOf(ownerAddress)).to.equal(usdcDust);
       expect(await weth.balanceOf(repayerAddress)).to.equal(0n);
       expect(await usdc.balanceOf(repayerAddress)).to.equal(0n);
       expect(await ethers.provider.getBalance(repayerAddress)).to.equal(0n);

@@ -320,12 +320,15 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const readyPreview = await repayer.previewEmergency();
     expect(readyPreview.sufficientlyFunded).to.equal(true);
     expect(readyPreview.sufficientlyApproved).to.equal(true);
+    const ownerAWethBeforeClose = await aWeth.balanceOf(positionOwner.address);
 
     await repayer.connect(positionOwner).forceRepayAll({ gasLimit: 4_000_000n });
 
     expect(await debtToken.balanceOf(positionOwner.address)).to.equal(0n);
-    expect(await aWeth.balanceOf(positionOwner.address)).to.be.lt(loopedAWethBefore);
-    expect(await aWeth.balanceOf(positionOwner.address)).to.be.gt(0n);
+    const ownerAWethAfterClose = await aWeth.balanceOf(positionOwner.address);
+    expect(ownerAWethAfterClose).to.be.gte(ownerAWethBeforeClose - readyPreview.worstCaseCollateralNeeded);
+    expect(ownerAWethAfterClose).to.be.lt(loopedAWethBefore);
+    expect(ownerAWethAfterClose).to.be.gt(0n);
     expect(await debtToken.balanceOf(repayerAddress)).to.equal(0n);
     expect(await aWeth.balanceOf(repayerAddress)).to.equal(0n);
     expect(await repayer.currentDebtUsdc()).to.equal(0n);
@@ -417,6 +420,268 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     await repayer.connect(keeper).checkAndRepay({ gasLimit: 3_500_000n });
 
     expect(await debtToken.balanceOf(positionOwner.address)).to.equal(0n);
+    expect(await debtToken.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await aWeth.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await repayer.currentDebtUsdc()).to.equal(0n);
+  });
+
+  it("lets keeper close a looped Aave WETH/USDC position when the lower HF trigger is reached", async function () {
+    const { ethers, networkHelpers } = await network.create({
+      network: "hardhatArbitrumFork",
+      chainType: "generic",
+    });
+    const [positionOwner, keeper] = await ethers.getSigners();
+    await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
+
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
+    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+
+    const config = {
+      aavePool: ARBITRUM.AAVE_POOL,
+      swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
+      weth: ARBITRUM.WETH,
+      usdc: ARBITRUM.USDC,
+      aWeth: ARBITRUM.A_WETH,
+      variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
+      positionOwner: positionOwner.address,
+      keeper: keeper.address,
+      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPoolFee: 500,
+      maxSlippageBps: 300,
+      // Deliberately high on the fork so the lower-trigger path is exercised without oracle manipulation.
+      triggerHealthFactor: ethers.parseUnits("10", 18),
+      usdcRepayBuffer: ethers.parseUnits("1", 6),
+    };
+
+    await verifyConfiguredUniswapPool(ethers.provider, config);
+    const repayer = await ethers.deployContract("AaveEmergencyRepayer", [config], positionOwner);
+    const repayerAddress = await repayer.getAddress();
+
+    const weth = new ethers.Contract(
+      ARBITRUM.WETH,
+      [
+        "function deposit() payable",
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const usdc = new ethers.Contract(
+      ARBITRUM.USDC,
+      [
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const pool = new ethers.Contract(
+      ARBITRUM.AAVE_POOL,
+      [
+        "function supply(address,uint256,address,uint16)",
+        "function borrow(address,uint256,uint256,uint16,address)",
+      ],
+      positionOwner,
+    );
+    const swapRouter = new ethers.Contract(
+      ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
+      [
+        "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
+      ],
+      positionOwner,
+    );
+    const aWeth = new ethers.Contract(
+      ARBITRUM.A_WETH,
+      [
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const debtToken = new ethers.Contract(
+      ARBITRUM.VARIABLE_DEBT_USDC,
+      ["function balanceOf(address) view returns (uint256)"],
+      ethers.provider,
+    );
+
+    const initialCollateral = ethers.parseEther("10");
+    const loopBorrow = ethers.parseUnits("6000", 6);
+    await weth.deposit({ value: initialCollateral });
+    await weth.approve(ARBITRUM.AAVE_POOL, initialCollateral);
+    await pool.supply(ARBITRUM.WETH, initialCollateral, positionOwner.address, 0);
+    await pool.borrow(ARBITRUM.USDC, loopBorrow, 2, 0, positionOwner.address);
+
+    await usdc.approve(ARBITRUM.UNISWAP_V3_SWAP_ROUTER, loopBorrow);
+    const wethBeforeLoopSwap = await weth.balanceOf(positionOwner.address);
+    await swapRouter.exactInputSingle({
+      tokenIn: ARBITRUM.USDC,
+      tokenOut: ARBITRUM.WETH,
+      fee: 500,
+      recipient: positionOwner.address,
+      deadline: ethers.MaxUint256,
+      amountIn: loopBorrow,
+      amountOutMinimum: 0,
+      sqrtPriceLimitX96: 0,
+    });
+    const loopedWeth = (await weth.balanceOf(positionOwner.address)) - wethBeforeLoopSwap;
+    expect(loopedWeth).to.be.gt(0n);
+
+    await weth.approve(ARBITRUM.AAVE_POOL, loopedWeth);
+    await pool.supply(ARBITRUM.WETH, loopedWeth, positionOwner.address, 0);
+
+    const loopedAWethBefore = await aWeth.balanceOf(positionOwner.address);
+    expect(loopedAWethBefore).to.be.gt(initialCollateral);
+    expect(await debtToken.balanceOf(positionOwner.address)).to.be.gte(loopBorrow);
+    expect(await repayer.healthFactor()).to.be.lte(config.triggerHealthFactor);
+
+    await aWeth.approve(repayerAddress, ethers.MaxUint256);
+    const readyPreview = await repayer.previewEmergency();
+    expect(readyPreview.triggerReached).to.equal(true);
+    expect(readyPreview.readyToExecute).to.equal(true);
+    const ownerAWethBeforeClose = await aWeth.balanceOf(positionOwner.address);
+
+    await repayer.connect(keeper).checkAndRepay({ gasLimit: 4_000_000n });
+
+    expect(await debtToken.balanceOf(positionOwner.address)).to.equal(0n);
+    const ownerAWethAfterClose = await aWeth.balanceOf(positionOwner.address);
+    expect(ownerAWethAfterClose).to.be.gte(ownerAWethBeforeClose - readyPreview.worstCaseCollateralNeeded);
+    expect(ownerAWethAfterClose).to.be.lt(loopedAWethBefore);
+    expect(ownerAWethAfterClose).to.be.gt(0n);
+    expect(await debtToken.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await aWeth.balanceOf(repayerAddress)).to.equal(0n);
+    expect(await repayer.currentDebtUsdc()).to.equal(0n);
+  });
+
+  it("lets keeper close a looped Aave WETH/USDC position when the live upper HF trigger is reached", async function () {
+    const { ethers, networkHelpers } = await network.create({
+      network: "hardhatArbitrumFork",
+      chainType: "generic",
+    });
+    const [positionOwner, keeper] = await ethers.getSigners();
+    await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
+
+    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL;
+    if (!configuredUniswapPool) throw new Error("Missing UNISWAP_WETH_USDC_POOL");
+
+    const config = {
+      aavePool: ARBITRUM.AAVE_POOL,
+      swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
+      weth: ARBITRUM.WETH,
+      usdc: ARBITRUM.USDC,
+      aWeth: ARBITRUM.A_WETH,
+      variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
+      positionOwner: positionOwner.address,
+      keeper: keeper.address,
+      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPoolFee: 500,
+      maxSlippageBps: 300,
+      triggerHealthFactor: ethers.parseUnits("1.10", 18),
+      usdcRepayBuffer: ethers.parseUnits("1", 6),
+    };
+
+    await verifyConfiguredUniswapPool(ethers.provider, config);
+    const repayer = await ethers.deployContract("AaveEmergencyRepayer", [config], positionOwner);
+    const repayerAddress = await repayer.getAddress();
+
+    const weth = new ethers.Contract(
+      ARBITRUM.WETH,
+      [
+        "function deposit() payable",
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const usdc = new ethers.Contract(
+      ARBITRUM.USDC,
+      [
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const pool = new ethers.Contract(
+      ARBITRUM.AAVE_POOL,
+      [
+        "function supply(address,uint256,address,uint16)",
+        "function borrow(address,uint256,uint256,uint16,address)",
+      ],
+      positionOwner,
+    );
+    const swapRouter = new ethers.Contract(
+      ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
+      [
+        "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
+      ],
+      positionOwner,
+    );
+    const aWeth = new ethers.Contract(
+      ARBITRUM.A_WETH,
+      [
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+      ],
+      positionOwner,
+    );
+    const debtToken = new ethers.Contract(
+      ARBITRUM.VARIABLE_DEBT_USDC,
+      ["function balanceOf(address) view returns (uint256)"],
+      ethers.provider,
+    );
+
+    const initialCollateral = ethers.parseEther("10");
+    const loopBorrow = ethers.parseUnits("6000", 6);
+    await weth.deposit({ value: initialCollateral });
+    await weth.approve(ARBITRUM.AAVE_POOL, initialCollateral);
+    await pool.supply(ARBITRUM.WETH, initialCollateral, positionOwner.address, 0);
+    await pool.borrow(ARBITRUM.USDC, loopBorrow, 2, 0, positionOwner.address);
+
+    await usdc.approve(ARBITRUM.UNISWAP_V3_SWAP_ROUTER, loopBorrow);
+    const wethBeforeLoopSwap = await weth.balanceOf(positionOwner.address);
+    await swapRouter.exactInputSingle({
+      tokenIn: ARBITRUM.USDC,
+      tokenOut: ARBITRUM.WETH,
+      fee: 500,
+      recipient: positionOwner.address,
+      deadline: ethers.MaxUint256,
+      amountIn: loopBorrow,
+      amountOutMinimum: 0,
+      sqrtPriceLimitX96: 0,
+    });
+    const loopedWeth = (await weth.balanceOf(positionOwner.address)) - wethBeforeLoopSwap;
+    expect(loopedWeth).to.be.gt(0n);
+
+    await weth.approve(ARBITRUM.AAVE_POOL, loopedWeth);
+    await pool.supply(ARBITRUM.WETH, loopedWeth, positionOwner.address, 0);
+
+    const loopedAWethBefore = await aWeth.balanceOf(positionOwner.address);
+    expect(loopedAWethBefore).to.be.gt(initialCollateral);
+    expect(await debtToken.balanceOf(positionOwner.address)).to.be.gte(loopBorrow);
+
+    const currentHf = await repayer.healthFactor();
+    const upperHf = (currentHf * 10_500n + 9_999n) / 10_000n;
+    await repayer.connect(keeper).setUpperHealthFactor(upperHf);
+    expect(await repayer.upperHealthFactor()).to.equal(upperHf);
+    expect((await repayer.previewEmergency()).triggerReached).to.equal(false);
+
+    const extraCollateral = ethers.parseEther("2");
+    await weth.deposit({ value: extraCollateral });
+    await weth.approve(ARBITRUM.AAVE_POOL, extraCollateral);
+    await pool.supply(ARBITRUM.WETH, extraCollateral, positionOwner.address, 0);
+    expect(await repayer.healthFactor()).to.be.gte(upperHf);
+
+    await aWeth.approve(repayerAddress, ethers.MaxUint256);
+    const readyPreview = await repayer.previewEmergency();
+    expect(readyPreview.triggerReached).to.equal(true);
+    expect(readyPreview.readyToExecute).to.equal(true);
+    const ownerAWethBeforeClose = await aWeth.balanceOf(positionOwner.address);
+
+    await repayer.connect(keeper).checkAndRepay({ gasLimit: 4_000_000n });
+
+    expect(await debtToken.balanceOf(positionOwner.address)).to.equal(0n);
+    const ownerAWethAfterClose = await aWeth.balanceOf(positionOwner.address);
+    expect(ownerAWethAfterClose).to.be.gte(ownerAWethBeforeClose - readyPreview.worstCaseCollateralNeeded);
+    expect(ownerAWethAfterClose).to.be.lt(ownerAWethBeforeClose);
+    expect(ownerAWethAfterClose).to.be.gt(0n);
     expect(await debtToken.balanceOf(repayerAddress)).to.equal(0n);
     expect(await aWeth.balanceOf(repayerAddress)).to.equal(0n);
     expect(await repayer.currentDebtUsdc()).to.equal(0n);
