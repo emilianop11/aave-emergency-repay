@@ -35,22 +35,12 @@ export function deploymentConfig() {
     variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
     positionOwner,
     keeper,
-    uniswapPool: configuredUniswapPool(),
-    uniswapPoolFee: configuredUniswapPoolFee(),
+    uniswapPool: ARBITRUM.UNISWAP_WETH_USDC_500_POOL,
+    uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
     maxSlippageBps,
     triggerHealthFactor: ethers.parseUnits(process.env.TRIGGER_HF ?? "1.10", 18),
     usdcRepayBuffer,
   };
-}
-
-export function configuredUniswapPool(): string {
-  return ethers.getAddress(process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL);
-}
-
-export function configuredUniswapPoolFee(): number {
-  const fee = Number(process.env.UNISWAP_POOL_FEE ?? String(ARBITRUM.UNISWAP_WETH_USDC_500_FEE));
-  if (!Number.isInteger(fee) || fee <= 0) throw new Error("UNISWAP_POOL_FEE must be a positive integer");
-  return fee;
 }
 
 export function repayerAddress(): string {

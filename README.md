@@ -137,7 +137,7 @@ Submit the printed calldata to the aWETH contract from a hardware wallet, Arbisc
 
 ## Explicit Uniswap Pool Invariant
 
-The WETH/USDC pool address is fixed in `scripts/addresses.ts` as the Arbitrum WETH/native-USDC 0.05% pool. `UNISWAP_WETH_USDC_POOL` and `UNISWAP_POOL_FEE` are optional overrides for non-standard testing only.
+The WETH/USDC pool address and fee are fixed in `scripts/addresses.ts` as the Arbitrum WETH/native-USDC 0.05% pool. They are not configurable through environment variables.
 
 The constructor verifies:
 

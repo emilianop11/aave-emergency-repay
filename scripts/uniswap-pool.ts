@@ -50,7 +50,7 @@ export async function verifyConfiguredUniswapPool(
   const usdc = getAddress(config.usdc);
   const configuredPool = getAddress(config.uniswapPool);
 
-  if (configuredPool === ZeroAddress) throw new Error("UNISWAP_WETH_USDC_POOL is zero");
+  if (configuredPool === ZeroAddress) throw new Error("Configured Uniswap WETH/USDC pool is zero");
   await requireCode(provider, "SwapRouter", routerAddress);
   await requireCode(provider, "Configured Uniswap pool", configuredPool);
 

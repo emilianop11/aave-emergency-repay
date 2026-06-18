@@ -1,6 +1,5 @@
 import { network } from "hardhat";
 import { ARBITRUM } from "./addresses.js";
-import { configuredUniswapPool, configuredUniswapPoolFee } from "./config.js";
 import { printVerifiedUniswapPool, verifyConfiguredUniswapPool } from "./uniswap-pool.js";
 
 const { ethers } = await network.create();
@@ -48,7 +47,7 @@ const verifiedPool = await verifyConfiguredUniswapPool(provider, {
   swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
   weth: ARBITRUM.WETH,
   usdc: ARBITRUM.USDC,
-  uniswapPool: configuredUniswapPool(),
-  uniswapPoolFee: configuredUniswapPoolFee(),
+  uniswapPool: ARBITRUM.UNISWAP_WETH_USDC_500_POOL,
+  uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
 });
 printVerifiedUniswapPool(verifiedPool);

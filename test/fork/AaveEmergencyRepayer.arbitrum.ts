@@ -18,8 +18,6 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
-
     const codeChecks = [
       ARBITRUM.AAVE_POOL,
       ARBITRUM.WETH,
@@ -27,7 +25,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       ARBITRUM.USDC,
       ARBITRUM.VARIABLE_DEBT_USDC,
       ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
-      configuredUniswapPool,
+      ARBITRUM.UNISWAP_WETH_USDC_500_POOL,
     ];
     for (const address of codeChecks) {
       expect(await ethers.provider.getCode(address)).not.to.equal("0x");
@@ -52,10 +50,10 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
       weth: ARBITRUM.WETH,
       usdc: ARBITRUM.USDC,
-      uniswapPool: configuredUniswapPool,
+      uniswapPool: ARBITRUM.UNISWAP_WETH_USDC_500_POOL,
       uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
     });
-    expect(verifiedPool.configuredPool).to.equal(ethers.getAddress(configuredUniswapPool));
+    expect(verifiedPool.configuredPool).to.equal(ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL));
     expect(verifiedPool.derivedPool).to.equal(verifiedPool.configuredPool);
     expect(verifiedPool.poolFactory).to.equal(verifiedPool.factory);
     expect(verifiedPool.fee).to.equal(ARBITRUM.UNISWAP_WETH_USDC_500_FEE);
@@ -69,7 +67,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
       positionOwner: positionOwner.address,
       keeper: keeper.address,
-      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPool: ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL),
       uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       // Deliberately high on the fork so checkAndRepay can be exercised without oracle manipulation.
@@ -201,8 +199,6 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
-
     const aavePoolView = new ethers.Contract(
       ARBITRUM.AAVE_POOL,
       ["function ADDRESSES_PROVIDER() view returns (address)"],
@@ -218,7 +214,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
       positionOwner: positionOwner.address,
       keeper: keeper.address,
-      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPool: ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL),
       uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       triggerHealthFactor: ethers.parseUnits("1.10", 18),
@@ -226,7 +222,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     };
 
     const verifiedPool = await verifyConfiguredUniswapPool(ethers.provider, config);
-    expect(verifiedPool.configuredPool).to.equal(ethers.getAddress(configuredUniswapPool));
+    expect(verifiedPool.configuredPool).to.equal(ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL));
 
     const repayer = await ethers.deployContract("AaveEmergencyRepayer", [config], positionOwner);
     const repayerAddress = await repayer.getAddress();
@@ -340,8 +336,6 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
-
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
       swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
@@ -351,7 +345,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
       positionOwner: positionOwner.address,
       keeper: keeper.address,
-      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPool: ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL),
       uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       triggerHealthFactor: ethers.parseUnits("1.10", 18),
@@ -430,8 +424,6 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
-
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
       swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
@@ -441,7 +433,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
       positionOwner: positionOwner.address,
       keeper: keeper.address,
-      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPool: ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL),
       uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       // Deliberately high on the fork so the lower-trigger path is exercised without oracle manipulation.
@@ -555,8 +547,6 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
     const [positionOwner, keeper] = await ethers.getSigners();
     await networkHelpers.setBalance(positionOwner.address, ethers.parseEther("100"));
 
-    const configuredUniswapPool = process.env.UNISWAP_WETH_USDC_POOL ?? ARBITRUM.UNISWAP_WETH_USDC_500_POOL;
-
     const config = {
       aavePool: ARBITRUM.AAVE_POOL,
       swapRouter: ARBITRUM.UNISWAP_V3_SWAP_ROUTER,
@@ -566,7 +556,7 @@ describeFork("AaveEmergencyRepayer — Arbitrum fork", function () {
       variableDebtUsdc: ARBITRUM.VARIABLE_DEBT_USDC,
       positionOwner: positionOwner.address,
       keeper: keeper.address,
-      uniswapPool: ethers.getAddress(configuredUniswapPool),
+      uniswapPool: ethers.getAddress(ARBITRUM.UNISWAP_WETH_USDC_500_POOL),
       uniswapPoolFee: ARBITRUM.UNISWAP_WETH_USDC_500_FEE,
       maxSlippageBps: 300,
       triggerHealthFactor: ethers.parseUnits("1.10", 18),
